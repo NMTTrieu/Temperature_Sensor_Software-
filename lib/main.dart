@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
-import 'presentation/screens/device_list_screen.dart';
 import 'presentation/screens/telemetry_list_screen.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
+  await Firebase.initializeApp();
   runApp(const MyApp());
 }
 
@@ -17,8 +14,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Thiết bị IoT',
       debugShowCheckedModeBanner: false,
+      title: 'Telemetry App',
       theme: ThemeData(primarySwatch: Colors.blue),
       home: const TelemetryListScreen(),
     );

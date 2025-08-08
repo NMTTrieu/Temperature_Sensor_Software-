@@ -1,39 +1,34 @@
 class TelemetryModel {
-  final double temperature;
   final String deviceId;
-  final String model;
-  final String type;
-  final String topic;
+  final double temperature;
   final DateTime timestamp;
 
+  // Các field tuỳ chọn nếu API có (không bắt buộc)
+  final String? model;
+  final String? type;
+  final String? topic;
+
   TelemetryModel({
-    required this.temperature,
     required this.deviceId,
-    required this.model,
-    required this.type,
-    required this.topic,
+    required this.temperature,
     required this.timestamp,
+    this.model,
+    this.type,
+    this.topic,
   });
 
   factory TelemetryModel.fromJson(Map<String, dynamic> json) {
+    // API của bạn dùng 'timestamp'. Nếu nguồn khác dùng 'lastSeen' thì fallback
+    final ts = json['timestamp'] ?? json['lastSeen'];
     return TelemetryModel(
-      temperature: (json['temperature'] as num).toDouble(),
-      deviceId: json['deviceId'],
-      model: json['model'],
-      type: json['type'],
-      topic: json['topic'],
-      timestamp: DateTime.parse(json['timestamp']),
+      deviceId: (json['deviceId'] ?? '').toString(),
+      temperature: (json['temperature'] as num?)?.toDouble() ?? 0.0,
+      timestamp: ts != null ? DateTime.parse(ts.toString()) : DateTime.now(),
+      model: json['model']?.toString(),
+      type: json['type']?.toString(),
+      topic: json['topic']?.toString(),
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'temperature': temperature,
-      'deviceId': deviceId,
-      'model': model,
-      'type': type,
-      'topic': topic,
-      'timestamp': timestamp.toIso8601String(),
-    };
-  }
+  String get key => '${deviceId}_${timestamp.millisecondsSinceEpoch}';
 }
