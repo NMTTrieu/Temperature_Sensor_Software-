@@ -37,7 +37,7 @@ class TelemetryCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    telemetry.deviceId ?? 'Unknown ID',
+                    telemetry.deviceId.toUpperCase() ?? 'Unknown ID',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white,
@@ -63,18 +63,32 @@ class TelemetryCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                InfoRow(
-                  icon: Icons.thermostat,
-                  text:
-                      "${telemetry.temperature?.toStringAsFixed(1) ?? '--'} °C",
-                  status: telemetry.temperature < _threshold ? 0 : 1,
+                Row(
+                  children: [
+                    InfoRow(
+                      icon: Icons.thermostat,
+                      text:
+                          "${telemetry.temperature?.toStringAsFixed(1) ?? '--'} °C",
+                      status: telemetry.temperature < _threshold ? 0 : 1,
+                    ),
+                    const SizedBox(
+                      height: 4,
+                      width: 10,
+                    ),
+                    InfoRow(
+                      icon: Icons.water_drop,
+                      text:
+                          "${telemetry.humidity?.toStringAsFixed(1) ?? '--'} &",
+                      status:
+                          (telemetry.humidity < 20 || telemetry.humidity > 80)
+                              ? 1
+                              : 0,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                // InfoRow(
-                //   icon: Icons.water_drop,
-                //   text: "${telemetry.humidity?.toStringAsFixed(1) ?? '--'} %",
-                // ),
-                // const SizedBox(height: 8),
+                const SizedBox(
+                  height: 8,
+                ),
                 Text(
                   "Cập nhật: ${_formatDate(telemetry.timestamp)}",
                   style: const TextStyle(color: Colors.grey, fontSize: 11),

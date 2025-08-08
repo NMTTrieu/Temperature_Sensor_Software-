@@ -17,7 +17,7 @@ class InfoRow extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: status == 0 ? Colors.green : Colors.red, size: 22),
+        Icon(icon, color: status == 0 ? Colors.green : Colors.red, size: 30),
         const SizedBox(width: 6),
         Text(text, style: const TextStyle(color: Colors.green, fontSize: 14)),
       ],

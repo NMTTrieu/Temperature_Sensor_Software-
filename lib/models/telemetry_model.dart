@@ -1,9 +1,8 @@
 class TelemetryModel {
   final String deviceId;
   final double temperature;
+  final double humidity;
   final DateTime timestamp;
-
-  // Các field tuỳ chọn nếu API có (không bắt buộc)
   final String? model;
   final String? type;
   final String? topic;
@@ -11,6 +10,7 @@ class TelemetryModel {
   TelemetryModel({
     required this.deviceId,
     required this.temperature,
+    required this.humidity,
     required this.timestamp,
     this.model,
     this.type,
@@ -23,6 +23,7 @@ class TelemetryModel {
     return TelemetryModel(
       deviceId: (json['deviceId'] ?? '').toString(),
       temperature: (json['temperature'] as num?)?.toDouble() ?? 0.0,
+      humidity: (json['humidity'] as num?)?.toDouble() ?? 0.0,
       timestamp: ts != null ? DateTime.parse(ts.toString()) : DateTime.now(),
       model: json['model']?.toString(),
       type: json['type']?.toString(),

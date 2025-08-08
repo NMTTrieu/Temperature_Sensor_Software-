@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:my_app/presentation/screens/telemetry_detail_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:my_app/models/telemetry_model.dart';
 import 'package:my_app/services/telemetry_service.dart';
 import 'package:my_app/services/firebase_service.dart';
 import 'package:my_app/presentation/widgets/telemetry_card.dart';
 import 'package:my_app/presentation/widgets/alert_badge.dart';
+import 'package:my_app/presentation/screens/telemetry_detail_screen.dart';
 
 class TelemetryListScreen extends StatefulWidget {
   const TelemetryListScreen({Key? key}) : super(key: key);
@@ -15,6 +16,7 @@ class TelemetryListScreen extends StatefulWidget {
 }
 
 class _TelemetryListScreenState extends State<TelemetryListScreen> {
+  // API + Firebase
   final _api = TelemetryService(
     apiUrl: 'https://be-mqtt-iot.onrender.com/api/telemetry',
   );
@@ -24,12 +26,16 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     path: 'telemrtry_updates',
   );
 
-  static const double _threshold = 37.0;
+  // Ngưỡng cảnh báo
+  static const double _tempThreshold = 37.0;
+  static const double _humidityMin = 20.0;
+  static const double _humidityMax = 80.0;
 
-  // state
-  List<TelemetryModel> _devices = [];
-  List<TelemetryModel> _unreadAlerts = [];
-  final Set<String> _readKeys = {}; // khoá các cảnh báo đã đọc
+  // State
+  List<TelemetryModel> _devices = []; // bản ghi mới nhất theo device
+  List<TelemetryModel> _unreadAlerts = []; // cảnh báo CHƯA ĐỌC
+  final Set<String> _readKeys =
+      {}; // khóa các cảnh báo đã đọc (deviceId+timestamp)
 
   bool _loading = true;
   Object? _error;
@@ -40,13 +46,10 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     _restoreReadState();
     _loadData(); // tải lần đầu
 
-    // Nghe realtime từ Firebase: khi có thay đổi -> gọi lại API (debounce sẵn)
-    _fb.start(
-      onChanged: () {
-        // chỉ refresh nền nếu đang mở màn
-        if (mounted) _loadData(silent: true);
-      },
-    );
+    // Nghe realtime từ Firebase -> gọi lại API (debounce đã có trong service)
+    _fb.start(onChanged: () {
+      if (mounted) _loadData(silent: true);
+    });
   }
 
   @override
@@ -55,7 +58,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     super.dispose();
   }
 
-  // Tạo khoá duy nhất cho 1 alert
+  // Tạo khóa duy nhất cho một alert (đã có trong model dưới tên .key)
   String _keyOf(TelemetryModel t) => t.key;
 
   Future<void> _persistReadState() async {
@@ -67,7 +70,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     final sp = await SharedPreferences.getInstance();
     final saved = sp.getStringList('readAlertKeys') ?? [];
     _readKeys.addAll(saved);
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadData({bool silent = false}) async {
@@ -81,31 +84,36 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
 
       final all = await _api.fetchTelemetry();
 
-      // lấy bản ghi mới nhất theo device
+      // Lấy bản ghi mới nhất cho mỗi deviceId
       final latestMap = <String, TelemetryModel>{};
       for (final t in all) {
-        final id = t.deviceId;
-        final old = latestMap[id];
+        final old = latestMap[t.deviceId];
         if (old == null || t.timestamp.isAfter(old.timestamp)) {
-          latestMap[id] = t;
+          latestMap[t.deviceId] = t;
         }
       }
 
-      // lọc cảnh báo chưa đọc
+      // Lọc CẢNH BÁO CHƯA ĐỌC theo ngưỡng temp/humidity
       final alerts = <TelemetryModel>[];
       for (final t in all) {
-        if (t.temperature >= _threshold && !_readKeys.contains(_keyOf(t))) {
+        final tooHot = t.temperature >= _tempThreshold;
+        final tooDry = t.humidity <= _humidityMin;
+        final tooHumid = t.humidity >= _humidityMax;
+
+        if ((tooHot || tooDry || tooHumid) && !_readKeys.contains(_keyOf(t))) {
           alerts.add(t);
         }
       }
 
-      setState(() {
-        _devices = latestMap.values.toList();
-        _unreadAlerts = alerts;
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _devices = latestMap.values.toList();
+          _unreadAlerts = alerts;
+          _loading = false;
+        });
+      }
     } catch (e) {
-      if (!silent) {
+      if (!silent && mounted) {
         setState(() {
           _error = e;
           _loading = false;
@@ -114,6 +122,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
+  // Đánh dấu 1 cảnh báo đã đọc
   void _markAsRead(TelemetryModel t) {
     final k = _keyOf(t);
     _readKeys.add(k);
@@ -122,6 +131,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     _persistReadState();
   }
 
+  // Đánh dấu tất cả đã đọc
   void _markAllAsRead() {
     for (final t in _unreadAlerts) {
       _readKeys.add(_keyOf(t));
@@ -131,13 +141,23 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     _persistReadState();
   }
 
+  String _alertReason(TelemetryModel t) {
+    final reasons = <String>[];
+    if (t.temperature >= _tempThreshold)
+      reasons.add('Nhiệt độ cao (≥ $_tempThreshold°C)');
+    if (t.humidity <= _humidityMin)
+      reasons.add('Độ ẩm thấp (≤ $_humidityMin%)');
+    if (t.humidity >= _humidityMax) reasons.add('Độ ẩm cao (≥ $_humidityMax%)');
+    return reasons.join(' · ');
+  }
+
   void _showAlertsDialog() {
     if (_unreadAlerts.isEmpty) return;
 
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Cảnh báo nhiệt độ cao'),
+        title: const Text('Cảnh báo môi trường'),
         content: SizedBox(
           width: double.maxFinite,
           child: ListView.builder(
@@ -148,7 +168,9 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
               return ListTile(
                 title: Text('Thiết bị: ${a.deviceId}'),
                 subtitle: Text(
-                  'Nhiệt độ: ${a.temperature.toStringAsFixed(1)}°C\n'
+                  '${_alertReason(a)}\n'
+                  'Nhiệt độ: ${a.temperature.toStringAsFixed(1)}°C · '
+                  'Độ ẩm: ${a.humidity.toStringAsFixed(1)}%\n'
                   'Lúc: ${a.timestamp.toLocal()}',
                 ),
                 trailing: TextButton(
@@ -230,17 +252,16 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
       appBar: AppBar(
         title: const Text('Danh sách thiết bị'),
         actions: [
-          AlertBadge(count: _unreadAlerts.length, onTap: _showAlertsDialog),
+          AlertBadge(
+            count: _unreadAlerts.length,
+            onTap: _showAlertsDialog,
+          ),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: _loadData, // kéo để tải lại từ API
         child: _buildBody(),
       ),
-      // floatingActionButton: FloatingActionButton(
-      //   onPressed: _loadData, // nút refresh thủ công
-      //   child: const Icon(Icons.refresh),
-      // ),
     );
   }
 }

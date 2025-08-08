@@ -5,7 +5,7 @@ class AlertBadge extends StatelessWidget {
   final VoidCallback onTap;
 
   const AlertBadge({Key? key, required this.count, required this.onTap})
-    : super(key: key);
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +24,7 @@ class AlertBadge extends StatelessWidget {
               ),
               child: Text(
                 '$count',
-                style: const TextStyle(color: Colors.white, fontSize: 12),
+                style: const TextStyle(color: Colors.white, fontSize: 8),
               ),
             ),
           ),
