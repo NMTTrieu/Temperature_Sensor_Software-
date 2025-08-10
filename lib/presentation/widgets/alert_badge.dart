@@ -5,26 +5,31 @@ class AlertBadge extends StatelessWidget {
   final VoidCallback onTap;
 
   const AlertBadge({Key? key, required this.count, required this.onTap})
-      : super(key: key);
+    : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return Stack(
+      clipBehavior: Clip.none,
       children: [
         IconButton(icon: const Icon(Icons.notifications), onPressed: onTap),
         if (count > 0)
           Positioned(
-            right: 10,
-            top: 10,
+            right: 8,
+            top: 8,
             child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
                 color: Colors.red,
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 '$count',
-                style: const TextStyle(color: Colors.white, fontSize: 8),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),

@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:my_app/models/telemetry_model.dart';
+import 'package:my_app/models/notification_model.dart';
 import 'package:my_app/services/telemetry_service.dart';
+import 'package:my_app/services/notification_service.dart';
 import 'package:my_app/services/firebase_service.dart';
+
 import 'package:my_app/presentation/widgets/telemetry_card.dart';
 import 'package:my_app/presentation/widgets/alert_badge.dart';
 import 'package:my_app/presentation/screens/telemetry_detail_screen.dart';
@@ -16,9 +19,12 @@ class TelemetryListScreen extends StatefulWidget {
 }
 
 class _TelemetryListScreenState extends State<TelemetryListScreen> {
-  // API + Firebase
+  // ====== Services ======
   final _api = TelemetryService(
     apiUrl: 'https://be-mqtt-iot.onrender.com/api/telemetry',
+  );
+  final _notifApi = NotificationService(
+    baseUrl: 'https://be-mqtt-iot.onrender.com/api/notifications',
   );
   final _fb = FirebaseChangeListener(
     databaseUrl:
@@ -26,30 +32,41 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     path: 'telemrtry_updates',
   );
 
-  // Ngưỡng cảnh báo
-  static const double _tempThreshold = 37.0;
-  static const double _humidityMin = 20.0;
-  static const double _humidityMax = 80.0;
-
-  // State
-  List<TelemetryModel> _devices = []; // bản ghi mới nhất theo device
-  List<TelemetryModel> _unreadAlerts = []; // cảnh báo CHƯA ĐỌC
-  final Set<String> _readKeys =
-      {}; // khóa các cảnh báo đã đọc (deviceId+timestamp)
-
+  // ====== Device list state ======
+  List<TelemetryModel> _devices = [];
   bool _loading = true;
   Object? _error;
 
+  // ====== Notification state ======
+  bool _loadingNotifs = true;
+  Object? _errorNotifs;
+
+  List<NotificationModel> _allNotifs = [];
+  List<NotificationModel> _unreadNotifs = [];
+  List<NotificationModel> _readNotifs = [];
+
+  // Local “đã đọc” (ghi khi đóng dialog)
+  final Set<String> _readIdsLocal = {};
+  static const _prefsKeyReadIds = 'notif_read_ids_v1';
+
+  // UI constants
+  static const double _notifItemHeight = 96.0;
+
+  // ========== Lifecycle ==========
   @override
   void initState() {
     super.initState();
-    _restoreReadState();
-    _loadData(); // tải lần đầu
-
-    // Nghe realtime từ Firebase -> gọi lại API (debounce đã có trong service)
-    _fb.start(onChanged: () {
-      if (mounted) _loadData(silent: true);
-    });
+    _restoreReadIds();
+    _loadData();
+    _refreshNotifications();
+    _fb.start(
+      onChanged: () {
+        if (mounted) {
+          _loadData(silent: true);
+          _refreshNotifications(); // để badge cập nhật sớm
+        }
+      },
+    );
   }
 
   @override
@@ -58,58 +75,41 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     super.dispose();
   }
 
-  // Tạo khóa duy nhất cho một alert (đã có trong model dưới tên .key)
-  String _keyOf(TelemetryModel t) => t.key;
-
-  Future<void> _persistReadState() async {
+  // ========== Persist read ids ==========
+  Future<void> _persistReadIds() async {
     final sp = await SharedPreferences.getInstance();
-    await sp.setStringList('readAlertKeys', _readKeys.toList());
+    await sp.setStringList(_prefsKeyReadIds, _readIdsLocal.toList());
   }
 
-  Future<void> _restoreReadState() async {
+  Future<void> _restoreReadIds() async {
     final sp = await SharedPreferences.getInstance();
-    final saved = sp.getStringList('readAlertKeys') ?? [];
-    _readKeys.addAll(saved);
+    final list = sp.getStringList(_prefsKeyReadIds) ?? [];
+    _readIdsLocal
+      ..clear()
+      ..addAll(list);
     if (mounted) setState(() {});
   }
 
+  // ========== Load devices ==========
   Future<void> _loadData({bool silent = false}) async {
     try {
-      if (!silent) {
-        setState(() {
-          _loading = true;
-          _error = null;
-        });
-      }
-
+      if (!silent) setState(() => _loading = true);
       final all = await _api.fetchTelemetry();
 
-      // Lấy bản ghi mới nhất cho mỗi deviceId
-      final latestMap = <String, TelemetryModel>{};
+      // newest per deviceId
+      final map = <String, TelemetryModel>{};
       for (final t in all) {
-        final old = latestMap[t.deviceId];
+        final old = map[t.deviceId];
         if (old == null || t.timestamp.isAfter(old.timestamp)) {
-          latestMap[t.deviceId] = t;
-        }
-      }
-
-      // Lọc CẢNH BÁO CHƯA ĐỌC theo ngưỡng temp/humidity
-      final alerts = <TelemetryModel>[];
-      for (final t in all) {
-        final tooHot = t.temperature >= _tempThreshold;
-        final tooDry = t.humidity <= _humidityMin;
-        final tooHumid = t.humidity >= _humidityMax;
-
-        if ((tooHot || tooDry || tooHumid) && !_readKeys.contains(_keyOf(t))) {
-          alerts.add(t);
+          map[t.deviceId] = t;
         }
       }
 
       if (mounted) {
         setState(() {
-          _devices = latestMap.values.toList();
-          _unreadAlerts = alerts;
+          _devices = map.values.toList();
           _loading = false;
+          _error = null;
         });
       }
     } catch (e) {
@@ -122,80 +122,330 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // Đánh dấu 1 cảnh báo đã đọc
-  void _markAsRead(TelemetryModel t) {
-    final k = _keyOf(t);
-    _readKeys.add(k);
-    _unreadAlerts.removeWhere((x) => _keyOf(x) == k);
-    setState(() {});
-    _persistReadState();
-  }
+  // ========== Load notifications (split unread/read) ==========
+  Future<void> _refreshNotifications() async {
+    try {
+      setState(() {
+        _loadingNotifs = true;
+        _errorNotifs = null;
+      });
 
-  // Đánh dấu tất cả đã đọc
-  void _markAllAsRead() {
-    for (final t in _unreadAlerts) {
-      _readKeys.add(_keyOf(t));
+      final items = await _notifApi.fetchNotifications();
+      _allNotifs = items;
+
+      final unread = <NotificationModel>[];
+      final read = <NotificationModel>[];
+
+      for (final n in items) {
+        final isRead = n.read == true || _readIdsLocal.contains(n.id);
+        if (isRead) {
+          read.add(n);
+        } else {
+          unread.add(n);
+        }
+      }
+
+      int _cmp(NotificationModel a, NotificationModel b) {
+        final at =
+            a.createdAt ??
+            a.savedAt ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+        final bt =
+            b.createdAt ??
+            b.savedAt ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+        return bt.compareTo(at);
+      }
+
+      unread.sort(_cmp);
+      read.sort(_cmp);
+
+      setState(() {
+        _unreadNotifs = unread;
+        _readNotifs = read;
+        _loadingNotifs = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorNotifs = e;
+        _loadingNotifs = false;
+      });
     }
-    _unreadAlerts.clear();
-    setState(() {});
-    _persistReadState();
   }
 
-  String _alertReason(TelemetryModel t) {
-    final reasons = <String>[];
-    if (t.temperature >= _tempThreshold)
-      reasons.add('Nhiệt độ cao (≥ $_tempThreshold°C)');
-    if (t.humidity <= _humidityMin)
-      reasons.add('Độ ẩm thấp (≤ $_humidityMin%)');
-    if (t.humidity >= _humidityMax) reasons.add('Độ ẩm cao (≥ $_humidityMax%)');
-    return reasons.join(' · ');
-  }
+  // ========== Dialog & filter ==========
+  Future<void> _openNotificationsDialog() async {
+    // snapshot tại thời điểm mở
+    final unreadNow = List<NotificationModel>.from(_unreadNotifs);
+    final readNow = List<NotificationModel>.from(_readNotifs);
 
-  void _showAlertsDialog() {
-    if (_unreadAlerts.isEmpty) return;
+    final seenIds = <String>{}; // chỉ ghi cho tab MỚI
 
-    showDialog(
+    final result = await showDialog<Set<String>>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Cảnh báo môi trường'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _unreadAlerts.length,
-            itemBuilder: (context, i) {
-              final a = _unreadAlerts[i];
-              return ListTile(
-                title: Text('Thiết bị: ${a.deviceId}'),
-                subtitle: Text(
-                  '${_alertReason(a)}\n'
-                  'Nhiệt độ: ${a.temperature.toStringAsFixed(1)}°C · '
-                  'Độ ẩm: ${a.humidity.toStringAsFixed(1)}%\n'
-                  'Lúc: ${a.timestamp.toLocal()}',
+      barrierDismissible: true,
+      builder: (_) {
+        final controller = ScrollController();
+        bool showUnread = true; // Mới / Đã đọc
+
+        void captureVisible(ScrollMetrics m) {
+          if (!showUnread) return; // chỉ đếm tab Mới
+          if (unreadNow.isEmpty) return;
+          final first = (m.pixels / _notifItemHeight).floor().clamp(
+            0,
+            unreadNow.length - 1,
+          );
+          final last = ((m.pixels + m.viewportDimension) / _notifItemHeight)
+              .floor()
+              .clamp(0, unreadNow.length - 1);
+          for (int i = first; i <= last; i++) {
+            seenIds.add(unreadNow[i].id);
+          }
+        }
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (controller.hasClients) captureVisible(controller.position);
+        });
+
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final list = showUnread ? unreadNow : readNow;
+
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 24,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: SafeArea(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 560),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header: filter (trái) + title
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
+                        child: Row(
+                          children: [
+                            _filterSegment(
+                              showUnread: showUnread,
+                              onTapUnread: () {
+                                setModalState(() => showUnread = true);
+                                if (controller.hasClients) {
+                                  captureVisible(controller.position);
+                                }
+                              },
+                              onTapRead: () =>
+                                  setModalState(() => showUnread = false),
+                            ),
+                            const SizedBox(width: 12),
+                            const Text(
+                              'Thông báo',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.pop(context, seenIds),
+                              tooltip: 'Đóng',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1),
+
+                      Expanded(
+                        child: _loadingNotifs
+                            ? const Center(child: CircularProgressIndicator())
+                            : _errorNotifs != null
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Text(
+                                    'Lỗi tải thông báo: $_errorNotifs',
+                                  ),
+                                ),
+                              )
+                            : list.isEmpty
+                            ? const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Text('Không có thông báo'),
+                                ),
+                              )
+                            : NotificationListener<ScrollNotification>(
+                                onNotification: (n) {
+                                  if (n.metrics.axis == Axis.vertical) {
+                                    captureVisible(n.metrics);
+                                  }
+                                  return false;
+                                },
+                                child: ListView.separated(
+                                  controller: controller,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                  itemCount: list.length,
+                                  separatorBuilder: (_, __) => const Divider(
+                                    height: 1,
+                                    indent: 16,
+                                    endIndent: 16,
+                                  ),
+                                  itemBuilder: (context, i) {
+                                    final n = list[i];
+                                    return SizedBox(
+                                      height: _notifItemHeight,
+                                      child: ListTile(
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 8,
+                                            ),
+                                        title: Text(
+                                          n.message.isEmpty
+                                              ? 'Thiết bị ${n.deviceId}'
+                                              : n.message,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        subtitle: Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 6,
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Thiết bị: ${n.deviceId} · Model: ${n.deviceModel}',
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'Nhiệt độ: ${n.temperature.toStringAsFixed(1)}°C · '
+                                                'Ẩm: ${n.humidity.toStringAsFixed(1)}%',
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'Lúc: ${n.createdAtText}',
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        onTap: () {}, // Không đánh dấu khi chạm
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                      ),
+
+                      const Divider(height: 1),
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 10, 16, 12),
+                        child: Text(
+                          'Cuộn để xem. Đóng để xác nhận đã xem các mục bạn đã lướt qua.',
+                          style: TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                trailing: TextButton(
-                  onPressed: () => _markAsRead(a),
-                  child: const Text('Đã đọc'),
-                ),
-                onTap: () => _markAsRead(a),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _markAllAsRead,
-            child: const Text('Đánh dấu tất cả đã đọc'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Đóng'),
-          ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    // sau khi đóng dialog
+    final seen = result ?? <String>{};
+    if (seen.isEmpty || !mounted) return;
+
+    setState(() {
+      // chuyển các item đã “lướt qua” từ unread sang read
+      for (final id in seen) {
+        _readIdsLocal.add(id);
+      }
+      final moved = _unreadNotifs.where((n) => _readIdsLocal.contains(n.id));
+      _readNotifs.insertAll(0, moved);
+      _unreadNotifs.removeWhere((n) => _readIdsLocal.contains(n.id));
+    });
+    await _persistReadIds();
+
+    // (tuỳ chọn) gọi API đánh dấu đã đọc
+    for (final id in seen) {
+      _notifApi.markAsRead(id).catchError((_) {});
+    }
+  }
+
+  // ========== Small widgets ==========
+  Widget _filterSegment({
+    required bool showUnread,
+    required VoidCallback onTapUnread,
+    required VoidCallback onTapRead,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
+      ),
+      child: Row(
+        children: [
+          _segBtn(label: 'Mới', selected: showUnread, onTap: onTapUnread),
+          _segBtn(label: 'Đã đọc', selected: !showUnread, onTap: onTapRead),
         ],
       ),
     );
   }
 
+  Widget _segBtn({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: selected
+              ? [const BoxShadow(color: Colors.black12, blurRadius: 4)]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.black : Colors.black87,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ========== Body ==========
   Widget _buildBody() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -222,30 +472,35 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
       return const Center(child: Text('Không có thiết bị nào'));
     }
 
-    return ListView.builder(
-      physics: const AlwaysScrollableScrollPhysics(),
-      itemCount: _devices.length,
-      itemBuilder: (context, i) {
-        final item = _devices[i];
-        return Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: GestureDetector(
-            onTap: () {
-              Navigator.push(
+    return RefreshIndicator(
+      onRefresh: () async {
+        await _loadData();
+        await _refreshNotifications();
+      },
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: _devices.length,
+        itemBuilder: (context, i) {
+          final item = _devices[i];
+          return Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: GestureDetector(
+              onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) =>
+                  builder: (_) =>
                       TelemetryDetailScreen(deviceId: item.deviceId),
                 ),
-              );
-            },
-            child: TelemetryCard(telemetry: item),
-          ),
-        );
-      },
+              ),
+              child: TelemetryCard(telemetry: item),
+            ),
+          );
+        },
+      ),
     );
   }
 
+  // ========== Build ==========
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -253,15 +508,12 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
         title: const Text('Danh sách thiết bị'),
         actions: [
           AlertBadge(
-            count: _unreadAlerts.length,
-            onTap: _showAlertsDialog,
+            count: _unreadNotifs.length,
+            onTap: _openNotificationsDialog,
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadData, // kéo để tải lại từ API
-        child: _buildBody(),
-      ),
+      body: _buildBody(),
     );
   }
 }
