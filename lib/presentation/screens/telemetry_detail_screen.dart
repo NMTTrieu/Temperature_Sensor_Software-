@@ -437,7 +437,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                 Row(
                   children: [
                     Text(
-                      'Analysis',
+                      'BIỂU ĐỒ',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:my_app/models/telemetry_model.dart';
 import 'package:my_app/models/notification_model.dart';
@@ -10,6 +11,9 @@ import 'package:my_app/services/firebase_service.dart';
 import 'package:my_app/presentation/widgets/telemetry_card.dart';
 import 'package:my_app/presentation/widgets/alert_badge.dart';
 import 'package:my_app/presentation/screens/telemetry_detail_screen.dart';
+
+// dùng notifier chung (alias cho rõ ràng)
+import 'package:my_app/notifications/notifier.dart' as notif;
 
 class TelemetryListScreen extends StatefulWidget {
   const TelemetryListScreen({Key? key}) : super(key: key);
@@ -32,6 +36,9 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     path: 'telemrtry_updates',
   );
 
+  // Theo dõi những ID thông báo đã từng thấy để chỉ báo những cái mới
+  final Set<String> _knownNotifIds = {};
+
   // ====== Device list state ======
   List<TelemetryModel> _devices = [];
   bool _loading = true;
@@ -52,18 +59,19 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
   // UI constants
   static const double _notifItemHeight = 96.0;
 
-  // ========== Lifecycle ==========
   @override
   void initState() {
     super.initState();
+
     _restoreReadIds();
     _loadData();
     _refreshNotifications();
+
     _fb.start(
       onChanged: () {
         if (mounted) {
           _loadData(silent: true);
-          _refreshNotifications(); // để badge cập nhật sớm
+          _refreshNotifications();
         }
       },
     );
@@ -75,7 +83,37 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     super.dispose();
   }
 
-  // ========== Persist read ids ==========
+  // ====== Local notifications when new items appear ======
+  void _maybeShowLocalNotifications(List<NotificationModel> newest) {
+    if (newest.isEmpty) return;
+
+    for (final n in newest) {
+      final unseen = !_knownNotifIds.contains(n.id);
+      final unreadLocal = !_readIdsLocal.contains(n.id) && !(n.read == true);
+      if (!unseen || !unreadLocal) continue;
+
+      notif.localNotif.show(
+        n.hashCode,
+        'Thiết bị ${n.deviceId}',
+        n.message.isNotEmpty
+            ? n.message
+            : 'Nhiệt: ${n.temperature.toStringAsFixed(1)}°C · '
+                  'Ẩm: ${n.humidity.toStringAsFixed(1)}%',
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            notif.androidChannel.id,
+            notif.androidChannel.name,
+            channelDescription: notif.androidChannel.description,
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: const DarwinNotificationDetails(),
+        ),
+      );
+    }
+  }
+
+  // ====== Persist read ids ======
   Future<void> _persistReadIds() async {
     final sp = await SharedPreferences.getInstance();
     await sp.setStringList(_prefsKeyReadIds, _readIdsLocal.toList());
@@ -90,13 +128,12 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     if (mounted) setState(() {});
   }
 
-  // ========== Load devices ==========
+  // ====== Load devices ======
   Future<void> _loadData({bool silent = false}) async {
     try {
       if (!silent) setState(() => _loading = true);
       final all = await _api.fetchTelemetry();
 
-      // newest per deviceId
       final map = <String, TelemetryModel>{};
       for (final t in all) {
         final old = map[t.deviceId];
@@ -122,7 +159,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // ========== Load notifications (split unread/read) ==========
+  // ====== Load notifications (split unread/read) ======
   Future<void> _refreshNotifications() async {
     try {
       setState(() {
@@ -133,17 +170,26 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
       final items = await _notifApi.fetchNotifications();
       _allNotifs = items;
 
+      final beforeIds = Set<String>.from(_knownNotifIds);
+      _knownNotifIds
+        ..clear()
+        ..addAll(items.map((e) => e.id));
+
       final unread = <NotificationModel>[];
       final read = <NotificationModel>[];
 
       for (final n in items) {
         final isRead = n.read == true || _readIdsLocal.contains(n.id);
-        if (isRead) {
-          read.add(n);
-        } else {
-          unread.add(n);
-        }
+        (isRead ? read : unread).add(n);
       }
+
+      final newlyArrived = items
+          .where((n) => !beforeIds.contains(n.id))
+          .toList();
+      final newlyArrivedUnread = newlyArrived
+          .where((n) => !(n.read == true) && !_readIdsLocal.contains(n.id))
+          .toList();
+      _maybeShowLocalNotifications(newlyArrivedUnread); // bắn noti mới
 
       int _cmp(NotificationModel a, NotificationModel b) {
         final at =
@@ -173,9 +219,56 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // ========== Dialog & filter ==========
+  // ---------- Dialog, filter, body, build (giữ nguyên UI cũ + icon chuông) ----------
+  Widget _filterSegment({
+    required bool showUnread,
+    required VoidCallback onTapUnread,
+    required VoidCallback onTapRead,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
+      ),
+      child: Row(
+        children: [
+          _segBtn(label: 'Mới', selected: showUnread, onTap: onTapUnread),
+          _segBtn(label: 'Đã đọc', selected: !showUnread, onTap: onTapRead),
+        ],
+      ),
+    );
+  }
+
+  Widget _segBtn({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: selected
+              ? [const BoxShadow(color: Colors.black12, blurRadius: 4)]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.black : Colors.black87,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openNotificationsDialog() async {
-    // snapshot tại thời điểm mở
     final unreadNow = List<NotificationModel>.from(_unreadNotifs);
     final readNow = List<NotificationModel>.from(_readNotifs);
 
@@ -186,10 +279,10 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
       barrierDismissible: true,
       builder: (_) {
         final controller = ScrollController();
-        bool showUnread = true; // Mới / Đã đọc
+        bool showUnread = true;
 
         void captureVisible(ScrollMetrics m) {
-          if (!showUnread) return; // chỉ đếm tab Mới
+          if (!showUnread) return;
           if (unreadNow.isEmpty) return;
           final first = (m.pixels / _notifItemHeight).floor().clamp(
             0,
@@ -225,7 +318,6 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header: filter (trái) + title
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
                         child: Row(
@@ -259,7 +351,6 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
                         ),
                       ),
                       const Divider(height: 1),
-
                       Expanded(
                         child: _loadingNotifs
                             ? const Center(child: CircularProgressIndicator())
@@ -332,8 +423,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
                                               ),
                                               const SizedBox(height: 2),
                                               Text(
-                                                'Nhiệt độ: ${n.temperature.toStringAsFixed(1)}°C · '
-                                                'Ẩm: ${n.humidity.toStringAsFixed(1)}%',
+                                                'Nhiệt độ: ${n.temperature.toStringAsFixed(1)}°C · Ẩm: ${n.humidity.toStringAsFixed(1)}%',
                                                 style: const TextStyle(
                                                   fontSize: 12,
                                                 ),
@@ -349,14 +439,13 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
                                             ],
                                           ),
                                         ),
-                                        onTap: () {}, // Không đánh dấu khi chạm
+                                        onTap: () {},
                                       ),
                                     );
                                   },
                                 ),
                               ),
                       ),
-
                       const Divider(height: 1),
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 10, 16, 12),
@@ -375,12 +464,10 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
       },
     );
 
-    // sau khi đóng dialog
     final seen = result ?? <String>{};
     if (seen.isEmpty || !mounted) return;
 
     setState(() {
-      // chuyển các item đã “lướt qua” từ unread sang read
       for (final id in seen) {
         _readIdsLocal.add(id);
       }
@@ -390,62 +477,11 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     });
     await _persistReadIds();
 
-    // (tuỳ chọn) gọi API đánh dấu đã đọc
     for (final id in seen) {
       _notifApi.markAsRead(id).catchError((_) {});
     }
   }
 
-  // ========== Small widgets ==========
-  Widget _filterSegment({
-    required bool showUnread,
-    required VoidCallback onTapUnread,
-    required VoidCallback onTapRead,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
-      ),
-      child: Row(
-        children: [
-          _segBtn(label: 'Mới', selected: showUnread, onTap: onTapUnread),
-          _segBtn(label: 'Đã đọc', selected: !showUnread, onTap: onTapRead),
-        ],
-      ),
-    );
-  }
-
-  Widget _segBtn({
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: selected
-              ? [const BoxShadow(color: Colors.black12, blurRadius: 4)]
-              : null,
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: selected ? Colors.black : Colors.black87,
-            fontSize: 12,
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ========== Body ==========
   Widget _buildBody() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -500,13 +536,13 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     );
   }
 
-  // ========== Build ==========
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Danh sách thiết bị'),
         actions: [
+          // Chuông + badge (giữ nguyên)
           AlertBadge(
             count: _unreadNotifs.length,
             onTap: _openNotificationsDialog,
