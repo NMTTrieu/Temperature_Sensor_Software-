@@ -27,7 +27,7 @@ Future<void> main() async {
   // Đăng ký handler background
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // Quyền thông báo (Android 13+/iOS)
+  // Quyền thông báo
   await FirebaseMessaging.instance.requestPermission(
     alert: true,
     badge: true,
@@ -35,7 +35,7 @@ Future<void> main() async {
     provisional: false,
   );
 
-  // (iOS) cho phép hiển thị thông báo khi app đang mở
+  //cho phép hiển thị thông báo khi app đang mở
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
     alert: true,
     badge: true,
@@ -75,7 +75,10 @@ class MyApp extends StatelessWidget {
 
     // Nhấn vào thông báo mở app
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage msg) {
-      // TODO: Điều hướng đến màn chi tiết nếu bạn muốn
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => SplashScreen()),
+      );
     });
 
     return const MaterialApp(

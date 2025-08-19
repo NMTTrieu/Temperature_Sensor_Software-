@@ -29,7 +29,7 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _boot() async {
-    // Khởi tạo thông báo cục bộ (nhanh, không block lâu)
+    // Khởi tạo thông báo cục bộ nhanh, không block lâu
     await Notifier.init();
 
     // “Splash time”
@@ -59,7 +59,7 @@ class _SplashScreenState extends State<SplashScreen>
             ScaleTransition(
               scale: _ac,
               child: Image.asset(
-                'assets/images/tl.webp', // bạn đã khai báo trong pubspec.yaml
+                'assets/images/tl.webp',
                 width: 160,
                 height: 160,
               ),

@@ -20,7 +20,6 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
   final _telemetryService = TelemetryService();
   final _deviceService = DeviceService();
 
-  // Device info
   DeviceModel? _device;
 
   // Dữ liệu biểu đồ
@@ -31,7 +30,6 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
   bool _loading = true;
   Object? _error;
 
-  /// '1d' | '7d' | '30d' | '1y'
   String _range = '7d';
 
   static const _rangeOptions = <String, String>{
@@ -105,7 +103,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     }
   }
 
-  /// Card thông tin thiết bị (model/firmware/type/topic/lastActive)
+  /// thông tin thiết bị
   Widget _buildDeviceHeader() {
     final d = _device;
     return Container(
@@ -183,7 +181,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     ),
   );
 
-  /// Vẽ 1 chart (nhiệt độ hoặc độ ẩm)
+  /// Vẽ 1 biều đồ
   Widget _buildChart({
     required List<FlSpot> spots,
     required Color stroke,
@@ -367,7 +365,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                       width: 1,
                     ),
                   ),
-                  // Chỉ vẽ DOT ở ĐẦU & CUỐI đường
+                  // Chỉ vẽ DOT ở đầu và cuối đường
                   lineBarsData: [
                     LineChartBarData(
                       spots: spots,

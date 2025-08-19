@@ -39,12 +39,10 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
   // Theo dõi những ID thông báo đã từng thấy để chỉ báo những cái mới
   final Set<String> _knownNotifIds = {};
 
-  // ====== Device list state ======
   List<TelemetryModel> _devices = [];
   bool _loading = true;
   Object? _error;
 
-  // ====== Notification state ======
   bool _loadingNotifs = true;
   Object? _errorNotifs;
 
@@ -113,12 +111,13 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // ====== Persist read ids ======
+  //Lưu các ID đã đọc
   Future<void> _persistReadIds() async {
     final sp = await SharedPreferences.getInstance();
     await sp.setStringList(_prefsKeyReadIds, _readIdsLocal.toList());
   }
 
+  //khôi phục lại dữ liệu đã lưu từ bộ nhớ SharedPreferences.
   Future<void> _restoreReadIds() async {
     final sp = await SharedPreferences.getInstance();
     final list = sp.getStringList(_prefsKeyReadIds) ?? [];
@@ -128,7 +127,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     if (mounted) setState(() {});
   }
 
-  // ====== Load devices ======
+  // Lấy dữ liệu thiết bị
   Future<void> _loadData({bool silent = false}) async {
     try {
       if (!silent) setState(() => _loading = true);
@@ -159,7 +158,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // ====== Load notifications (split unread/read) ======
+  // Chạy lại thông báo
   Future<void> _refreshNotifications() async {
     try {
       setState(() {
@@ -219,7 +218,6 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // ---------- Dialog, filter, body, build (giữ nguyên UI cũ + icon chuông) ----------
   Widget _filterSegment({
     required bool showUnread,
     required VoidCallback onTapUnread,
@@ -272,7 +270,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     final unreadNow = List<NotificationModel>.from(_unreadNotifs);
     final readNow = List<NotificationModel>.from(_readNotifs);
 
-    final seenIds = <String>{}; // chỉ ghi cho tab MỚI
+    final seenIds = <String>{};
 
     final result = await showDialog<Set<String>>(
       context: context,
@@ -447,13 +445,6 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
                               ),
                       ),
                       const Divider(height: 1),
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(16, 10, 16, 12),
-                        child: Text(
-                          'Cuộn để xem. Đóng để xác nhận đã xem các mục bạn đã lướt qua.',
-                          style: TextStyle(color: Colors.grey, fontSize: 12),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -542,7 +533,6 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
       appBar: AppBar(
         title: const Text('Danh sách thiết bị'),
         actions: [
-          // Chuông + badge (giữ nguyên)
           AlertBadge(
             count: _unreadNotifs.length,
             onTap: _openNotificationsDialog,
