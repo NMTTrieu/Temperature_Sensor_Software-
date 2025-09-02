@@ -12,7 +12,7 @@ import 'package:my_app/notifications/notifier.dart' as notif;
 // Handler cho FCM khi app ở background/terminated (phải là hàm top-level)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  // Có thể xử lý thêm nếu cần
+  print("Background Message: ${message.notification?.title}");
 }
 
 Future<void> main() async {

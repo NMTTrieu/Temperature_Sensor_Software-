@@ -43,9 +43,7 @@ class TelemetryService {
     String deviceId, {
     String? range,
   }) async {
-    final String url = range != null
-        ? '$apiUrl?deviceId=$deviceId&range=$range'
-        : '$apiUrl?deviceId=$deviceId';
+    final String url = '$apiUrl?deviceId=$deviceId'; // Lấy toàn bộ dữ liệu
 
     final res = await http.get(Uri.parse(url));
 
@@ -56,9 +54,34 @@ class TelemetryService {
     }
 
     final body = res.body.isEmpty ? '[]' : res.body;
+    print('API Response for $url: $body');
     final jsonData = json.decode(body);
+    List<TelemetryModel> data = _parseJsonToTelemetryList(jsonData);
 
-    return _parseJsonToTelemetryList(jsonData);
+    // Lọc dữ liệu theo range nếu cần
+    if (range != null) {
+      final now = DateTime.now();
+      DateTime start;
+      switch (range) {
+        case '1d':
+          start = DateTime(now.year, now.month, now.day);
+          break;
+        case '7d':
+          start = now.subtract(const Duration(days: 7));
+          break;
+        case '30d':
+          start = now.subtract(const Duration(days: 30));
+          break;
+        case '1y':
+          start = now.subtract(const Duration(days: 365));
+          break;
+        default:
+          start = now.subtract(const Duration(days: 7));
+      }
+      data = data.where((t) => t.timestamp.isAfter(start)).toList();
+    }
+
+    return data;
   }
 
   /// Chuyển dữ liệu JSON thành List<TelemetryModel>

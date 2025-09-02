@@ -20,7 +20,6 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
   final _telemetryService = TelemetryService();
   final _deviceService = DeviceService();
 
-  // Device info
   DeviceModel? _device;
 
   // Dữ liệu biểu đồ
@@ -31,7 +30,6 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
   bool _loading = true;
   Object? _error;
 
-  /// '1d' | '7d' | '30d' | '1y'
   String _range = '7d';
 
   static const _rangeOptions = <String, String>{
@@ -90,22 +88,24 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     }
   }
 
-  String _formatXLabel(int index) {
-    if (index < 0 || index >= _xTimes.length) return '';
-    final dt = _xTimes[index].toLocal();
+  String _formatXLabel(DateTime time) {
+    final duration = _xTimes.isNotEmpty
+        ? _xTimes.last.difference(_xTimes.first).inHours / 24
+        : 0;
+    if (duration <= 1) {
+      return DateFormat('HH:mm').format(time); // Hiển thị giờ nếu ≤ 1 ngày
+    }
     switch (_range) {
-      case '1d':
-        return DateFormat('HH:mm').format(dt);
       case '7d':
       case '30d':
-        return DateFormat('d/M').format(dt);
+        return DateFormat('d/M').format(time); // Hiển thị ngày nếu > 1 ngày
       case '1y':
       default:
-        return DateFormat('MM/yyyy').format(dt);
+        return DateFormat('MM/yyyy').format(time); // Hiển thị tháng
     }
   }
 
-  /// Card thông tin thiết bị (model/firmware/type/topic/lastActive)
+  /// Thông tin thiết bị
   Widget _buildDeviceHeader() {
     final d = _device;
     return Container(
@@ -183,7 +183,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     ),
   );
 
-  /// Vẽ 1 chart (nhiệt độ hoặc độ ẩm)
+  /// Vẽ 1 biểu đồ
   Widget _buildChart({
     required List<FlSpot> spots,
     required Color stroke,
@@ -211,6 +211,29 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     // giá trị x đầu/cuối (để chỉ hiện dot ở 2 mốc này)
     final double? firstX = spots.isNotEmpty ? spots.first.x : null;
     final double? lastX = spots.isNotEmpty ? spots.last.x : null;
+
+    // Tạo danh sách mốc thời gian cố định nếu ≤ 1 ngày
+    List<DateTime> timeTicks = [];
+    if (_xTimes.isNotEmpty &&
+        _xTimes.last.difference(_xTimes.first).inHours / 24 <= 1) {
+      final start = _xTimes.first.toLocal();
+      final end = _xTimes.last.toLocal();
+      var current = DateTime(
+        start.year,
+        start.month,
+        start.day,
+        start.hour,
+        start.minute,
+      );
+      while (current.isBefore(end) || current.isAtSameMomentAs(end)) {
+        timeTicks.add(current);
+        current = current.add(const Duration(minutes: 30)); // Mốc 30 phút
+      }
+      // Đảm bảo bao gồm mốc cuối cùng
+      if (!timeTicks.contains(end)) {
+        timeTicks.add(end);
+      }
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -332,17 +355,46 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 36,
-                        interval: step.toDouble(),
+                        interval:
+                            maxX /
+                            (timeTicks.length > 0
+                                    ? timeTicks.length - 1
+                                    : _xTimes.length - 1)
+                                .toDouble(),
                         getTitlesWidget: (value, meta) {
-                          final idx = value.round();
-                          if (idx % step != 0) return const SizedBox.shrink();
-                          if (idx < 0 || idx >= _xTimes.length) {
-                            return const SizedBox.shrink();
+                          if (_xTimes.isEmpty) return const SizedBox.shrink();
+                          if (timeTicks.isNotEmpty) {
+                            final tickIdx =
+                                (value / maxX * (timeTicks.length - 1)).round();
+                            if (tickIdx >= 0 && tickIdx < timeTicks.length) {
+                              final label = _formatXLabel(timeTicks[tickIdx]);
+                              if (tickIdx > 0) {
+                                final prevLabel = _formatXLabel(
+                                  timeTicks[tickIdx - 1],
+                                );
+                                if (prevLabel == label)
+                                  return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  label,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              );
+                            }
                           }
-                          final label = _formatXLabel(idx);
-                          if (idx == _xTimes.length - 1 &&
-                              idx - 1 >= 0 &&
-                              _formatXLabel(idx - 1) == label) {
+                          final idx = (value / maxX * (_xTimes.length - 1))
+                              .round();
+                          if (idx < 0 || idx >= _xTimes.length)
+                            return const SizedBox.shrink();
+                          final label = _formatXLabel(_xTimes[idx]);
+                          if (idx > 0 &&
+                              _formatXLabel(_xTimes[idx - 1]) == label) {
                             return const SizedBox.shrink();
                           }
                           return Padding(
@@ -367,7 +419,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                       width: 1,
                     ),
                   ),
-                  // Chỉ vẽ DOT ở ĐẦU & CUỐI đường
+                  // Chỉ vẽ DOT ở đầu và cuối đường
                   lineBarsData: [
                     LineChartBarData(
                       spots: spots,

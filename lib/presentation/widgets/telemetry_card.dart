@@ -67,17 +67,15 @@ class TelemetryCard extends StatelessWidget {
                   children: [
                     InfoRow(
                       icon: Icons.thermostat,
-                      text:
-                          "${telemetry.temperature?.toStringAsFixed(1) ?? '--'} °C",
+                      text: "${telemetry.temperature.toStringAsFixed(1)} °C",
                       status: telemetry.temperature < _threshold ? 0 : 1,
                     ),
                     const SizedBox(height: 4, width: 10),
                     InfoRow(
                       icon: Icons.water_drop,
-                      text:
-                          "${telemetry.humidity?.toStringAsFixed(1) ?? '--'} &",
+                      text: "${telemetry.humidity.toStringAsFixed(1)} &",
                       status:
-                          (telemetry.humidity < 20 || telemetry.humidity > 80)
+                          (telemetry.humidity < 20 || telemetry.humidity > 90)
                           ? 1
                           : 0,
                     ),
