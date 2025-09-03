@@ -67,14 +67,14 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     _loadData();
     _refreshNotifications();
 
-    _fb.start(
-      onChanged: () {
-        if (mounted) {
-          _loadData(silent: true);
-          _refreshNotifications();
-        }
-      },
-    );
+    // _fb.start(
+    //   onChanged: () {
+    //     if (mounted) {
+    //       _loadData(silent: true);
+    //       _refreshNotifications();
+    //     }
+    //   },
+    // );
   }
 
   @override
