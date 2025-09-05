@@ -29,7 +29,7 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _boot() async {
-    // Khởi tạo thông báo cục bộ (nhanh, không block lâu)
+    // Khởi tạo thông báo cục bộ
     await Notifier.init();
 
     // “Splash time”
@@ -58,15 +58,11 @@ class _SplashScreenState extends State<SplashScreen>
           children: [
             ScaleTransition(
               scale: _ac,
-              child: Image.asset(
-                'assets/images/tl.webp', // bạn đã khai báo trong pubspec.yaml
-                width: 160,
-                height: 160,
-              ),
+              child: Image.asset('assets/images/tl.webp', height: 160),
             ),
             const SizedBox(height: 18),
             Text(
-              'Smart Garden',
+              'SmartNode',
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w800,
               ),

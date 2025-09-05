@@ -128,7 +128,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     if (mounted) setState(() {});
   }
 
-  // ====== Load devices ======
+  // Lấy danh sách thiết bị
   Future<void> _loadData({bool silent = false}) async {
     try {
       if (!silent) setState(() => _loading = true);
@@ -159,7 +159,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // ====== Load notifications (split unread/read) ======
+  // Làm mới danh sách thông báo
   Future<void> _refreshNotifications() async {
     try {
       setState(() {
@@ -189,7 +189,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
       final newlyArrivedUnread = newlyArrived
           .where((n) => !(n.read == true) && !_readIdsLocal.contains(n.id))
           .toList();
-      _maybeShowLocalNotifications(newlyArrivedUnread); // bắn noti mới
+      _maybeShowLocalNotifications(newlyArrivedUnread);
 
       int _cmp(NotificationModel a, NotificationModel b) {
         final at =
@@ -272,7 +272,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     final unreadNow = List<NotificationModel>.from(_unreadNotifs);
     final readNow = List<NotificationModel>.from(_readNotifs);
 
-    final seenIds = <String>{}; // chỉ ghi cho tab MỚI
+    final seenIds = <String>{};
 
     final result = await showDialog<Set<String>>(
       context: context,
@@ -450,7 +450,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 10, 16, 12),
                         child: Text(
-                          'Cuộn để xem. Đóng để xác nhận đã xem các mục bạn đã lướt qua.',
+                          '',
                           style: TextStyle(color: Colors.grey, fontSize: 12),
                         ),
                       ),

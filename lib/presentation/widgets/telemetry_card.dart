@@ -73,7 +73,7 @@ class TelemetryCard extends StatelessWidget {
                     const SizedBox(height: 4, width: 10),
                     InfoRow(
                       icon: Icons.water_drop,
-                      text: "${telemetry.humidity.toStringAsFixed(1)} &",
+                      text: "${telemetry.humidity.toStringAsFixed(1)} %",
                       status:
                           (telemetry.humidity < 20 || telemetry.humidity > 90)
                           ? 1

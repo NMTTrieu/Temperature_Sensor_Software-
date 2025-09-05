@@ -17,7 +17,7 @@ android {
         versionName = flutter.versionName
     }
 
-    // BẮT BUỘC: bật desugaring (đúng cú pháp KTS)
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -40,13 +40,9 @@ flutter {
 }
 
 dependencies {
-    // Kotlin stdlib (tuỳ vào BOM của bạn; 1.9.25 hiện ổn)
+
     implementation(kotlin("stdlib", "1.9.25"))
-
-    // BẮT BUỘC: thư viện desugar >= 2.1.4 (plugin yêu cầu)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-
-    // (tuỳ chọn) AndroidX cơ bản
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 }

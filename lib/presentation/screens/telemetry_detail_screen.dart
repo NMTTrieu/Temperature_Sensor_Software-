@@ -20,6 +20,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
   final _deviceService = DeviceService();
 
   DeviceModel? _device;
+  List<TelemetryModel> _allData = []; // Lưu toàn bộ dữ liệu tải về
 
   // Dữ liệu biểu đồ
   List<DateTime> _xTimes = [];
@@ -29,23 +30,22 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
   bool _loading = true;
   Object? _error;
 
-  String _range = '7d'; // Mặc định là 7 ngày
+  String _range = '30d'; // Mặc định là 30 ngày
   bool _userOverrodeRange = false; // Người dùng đã thay đổi phạm vi thủ công?
 
   static const _rangeOptions = <String, String>{
     '1d': 'Hôm nay',
     '7d': '7 ngày',
     '30d': '30 ngày',
-    '1y': '1 năm',
   };
 
   @override
   void initState() {
     super.initState();
-    _refresh(); // load device + telemetry
+    _loadInitialData(); // Load dữ liệu 30 ngày khi khởi tạo
   }
 
-  Future<void> _refresh() async {
+  Future<void> _loadInitialData() async {
     setState(() {
       _loading = true;
       _error = null;
@@ -56,60 +56,22 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
         _deviceService.fetchDeviceById(widget.deviceId),
         _telemetryService.fetchTelemetryByDeviceAndRange(
           widget.deviceId,
-          range: _range,
-        ),
+          range: '30d',
+        ), // Load dữ liệu 30 ngày
       ]);
 
       final device = results[0] as DeviceModel?;
       final data = (results[1] as List<TelemetryModel>)
         ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-      final times = <DateTime>[];
-      final tSpots = <FlSpot>[];
-      final hSpots = <FlSpot>[];
-
-      if (data.isNotEmpty) {
-        if (_range == '1d') {
-          final now = DateTime.now().toLocal(); // 11:18 AM +07, 03/09/2025
-          final startOfDay = DateTime(now.year, now.month, now.day);
-          final previousDay = startOfDay.subtract(const Duration(days: 1));
-          final previousData = await _telemetryService
-              .fetchTelemetryByDeviceAndRange(widget.deviceId, range: '1d');
-          double startTemperature = 0.0;
-          double startHumidity = 0.0;
-          if (previousData.isNotEmpty) {
-            startTemperature = previousData.last.temperature;
-            startHumidity = previousData.last.humidity;
-          }
-          times.add(startOfDay);
-          tSpots.add(FlSpot(0, startTemperature));
-          hSpots.add(FlSpot(0, startHumidity));
-          final endTime = now; // Giờ, phút hiện tại
-          times.add(endTime);
-          final lastData = data.last;
-          tSpots.add(FlSpot(1.0, lastData.temperature));
-          hSpots.add(FlSpot(1.0, lastData.humidity));
-        } else {
-          // Với 7d, 30d, 1y: Bắt đầu từ dữ liệu sớm nhất đến ngày hiện tại
-          final startTime = data.first.timestamp;
-          final endTime = DateTime.now().toLocal();
-          times.add(startTime); // Dot đầu
-          tSpots.add(FlSpot(0, data.first.temperature));
-          hSpots.add(FlSpot(0, data.first.humidity));
-          times.add(endTime); // Dot cuối
-          tSpots.add(FlSpot(1.0, data.last.temperature));
-          hSpots.add(FlSpot(1.0, data.last.humidity));
-        }
-      }
-
       setState(() {
         _device = device;
-        _xTimes = times;
-        _tempSpots = tSpots;
-        _humSpots = hSpots;
+        _allData = data;
+        _updateChartData(); // Cập nhật biểu đồ dựa trên _range mặc định (30 ngày)
         _loading = false;
       });
     } catch (e) {
+      print('Error loading data: $e'); // Log lỗi để debug
       setState(() {
         _loading = false;
         _error = e;
@@ -117,8 +79,112 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     }
   }
 
+  void _updateChartData() {
+    final times = <DateTime>[];
+    final tSpots = <FlSpot>[];
+    final hSpots = <FlSpot>[];
+    final now = DateTime.now().toLocal(); // 12:52 AM +07, 05/09/2025
+    final startOfDay = DateTime(now.year, now.month, now.day);
+
+    if (_allData.isEmpty) {
+      times.add(now);
+      setState(() {
+        _xTimes = times;
+        _tempSpots = tSpots;
+        _humSpots = hSpots;
+      });
+      return;
+    }
+
+    DateTime startDate;
+    int daysAgo = 0;
+
+    if (_range == '1d') {
+      startDate = startOfDay;
+    } else if (_range == '7d') {
+      daysAgo = 7;
+      startDate = now.subtract(Duration(days: daysAgo));
+    } else if (_range == '30d') {
+      daysAgo = 30;
+      startDate = now.subtract(Duration(days: daysAgo));
+    } else {
+      startDate = startOfDay;
+    }
+
+    // Tìm giá trị gần nhất trước startDate
+    TelemetryModel? nearestBeforeStart;
+    double startTemperature = 0.0;
+    double startHumidity = 0.0;
+    final relevantData = _allData
+        .where((t) => t.timestamp.isBefore(startDate))
+        .toList();
+    if (relevantData.isNotEmpty) {
+      relevantData.sort(
+        (a, b) => b.timestamp.compareTo(a.timestamp),
+      ); // Sắp xếp giảm dần để lấy gần nhất
+      nearestBeforeStart = relevantData.first;
+    } else {
+      // Nếu không có dữ liệu trước startDate, lấy dữ liệu gần nhất sau startDate
+      final afterData = _allData
+          .where((t) => t.timestamp.isAfter(startDate))
+          .toList();
+      if (afterData.isNotEmpty) {
+        afterData.sort(
+          (a, b) => a.timestamp.compareTo(b.timestamp),
+        ); // Sắp xếp tăng dần để lấy gần nhất
+        nearestBeforeStart = afterData.first;
+        startDate = nearestBeforeStart
+            .timestamp; // Thay đổi startDate thành ngày của dữ liệu gần nhất
+      }
+    }
+
+    if (nearestBeforeStart != null) {
+      startTemperature = nearestBeforeStart.temperature;
+      startHumidity = nearestBeforeStart.humidity;
+    }
+
+    times.add(startDate); // Bắt đầu từ startDate
+    tSpots.add(FlSpot(0, startTemperature));
+    hSpots.add(FlSpot(0, startHumidity));
+
+    // Lọc dữ liệu trong khoảng thời gian
+    final filteredData = _allData.where((t) {
+      final diff = now.difference(t.timestamp).inDays.abs();
+      return diff <= daysAgo;
+    }).toList()..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    for (int i = 0; i < filteredData.length; i++) {
+      final dataPoint = filteredData[i];
+      final xIndex = (i + 1) * (times.length - 1) ~/ filteredData.length;
+      times.add(dataPoint.timestamp);
+      tSpots.add(FlSpot(xIndex.toDouble(), dataPoint.temperature));
+      hSpots.add(FlSpot(xIndex.toDouble(), dataPoint.humidity));
+    }
+
+    times.add(now); // Điểm cuối là ngày hiện tại
+    if (filteredData.isNotEmpty) {
+      tSpots.add(
+        FlSpot((times.length - 1).toDouble(), filteredData.last.temperature),
+      );
+      hSpots.add(
+        FlSpot((times.length - 1).toDouble(), filteredData.last.humidity),
+      );
+    } else {
+      tSpots.add(FlSpot((times.length - 1).toDouble(), startTemperature));
+      hSpots.add(FlSpot((times.length - 1).toDouble(), startHumidity));
+    }
+
+    setState(() {
+      _xTimes = times;
+      _tempSpots = tSpots;
+      _humSpots = hSpots;
+    });
+  }
+
   String _formatXLabel(int index) {
-    if (index < 0 || index >= _xTimes.length) return '';
+    if (index < 0 || index >= _xTimes.length) {
+      print('Invalid index: $index, _xTimes length: ${_xTimes.length}');
+      return '';
+    }
     final dt = _xTimes[index].toLocal();
     switch (_range) {
       case '1d':
@@ -128,10 +194,8 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
       case '7d':
       case '30d':
         return DateFormat('d/M').format(dt); // Hiển thị ngày/tháng cho 7d, 30d
-      case '1y':
-      default:
-        return DateFormat('MM/yyyy').format(dt); // Hiển thị tháng/năm cho 1y
     }
+    return '';
   }
 
   /// Card thông tin thiết bị (model/firmware/type/topic/lastActive)
@@ -237,10 +301,6 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     final double minX = 0;
     final double maxX = spots.isEmpty ? 1 : (spots.length - 1).toDouble();
 
-    // giá trị x đầu/cuối (để chỉ hiện dot ở 2 mốc này)
-    final double? firstX = spots.isNotEmpty ? spots.first.x : null;
-    final double? lastX = spots.isNotEmpty ? spots.last.x : null;
-
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -274,18 +334,33 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                         horizontal: 10,
                         vertical: 6,
                       ),
-                      getTooltipItems: (touched) => touched
-                          .map(
-                            (t) => LineTooltipItem(
-                              '${t.y.toStringAsFixed(1)} $yUnitSuffix',
-                              TextStyle(
-                                color: Colors.grey[800],
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12,
-                              ),
+                      getTooltipItems: (touchedSpots) {
+                        return touchedSpots.map((touchedSpot) {
+                          final index = touchedSpot.spotIndex;
+                          final yValue = touchedSpot.y.toStringAsFixed(1);
+                          String timeLabel;
+                          if (index >= 0 && index < _xTimes.length) {
+                            final dt = _xTimes[index].toLocal();
+                            timeLabel = _range == '1d'
+                                ? DateFormat('HH:mm').format(
+                                    dt,
+                                  ) // Giờ:phút cho "Hôm nay"
+                                : DateFormat(
+                                    'd/M',
+                                  ).format(dt); // Ngày/tháng cho 7d, 30d
+                          } else {
+                            timeLabel = 'N/A';
+                          }
+                          return LineTooltipItem(
+                            '$yValue $yUnitSuffix\n$timeLabel',
+                            TextStyle(
+                              color: Colors.grey[800],
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
                             ),
-                          )
-                          .toList(),
+                          );
+                        }).toList();
+                      },
                     ),
                     getTouchedSpotIndicator: (bar, spotIndexes) {
                       return spotIndexes
@@ -339,20 +414,27 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 48,
-                        interval: yInterval,
-                        getTitlesWidget: (value, meta) => Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Text(
-                            value % 1 == 0
-                                ? value.toStringAsFixed(0)
-                                : value.toStringAsFixed(1),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
+                        interval:
+                            (maxY -
+                            minY), // Đặt interval bằng toàn bộ phạm vi để chỉ hiển thị 2 nhãn
+                        getTitlesWidget: (value, meta) {
+                          if (value == minY || value == maxY) {
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Text(
+                                value % 1 == 0
+                                    ? value.toStringAsFixed(0)
+                                    : value.toStringAsFixed(1),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[600],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink(); // Ẩn các nhãn khác
+                        },
                       ),
                     ),
                     bottomTitles: AxisTitles(
@@ -393,8 +475,8 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                   lineBarsData: [
                     LineChartBarData(
                       spots: spots,
-                      isCurved: false,
-                      barWidth: 3.5,
+                      isCurved: true, // Thêm đường cong để hiển thị mượt hơn
+                      barWidth: 2.0,
                       color: stroke,
                       gradient: LinearGradient(
                         colors: [stroke, stroke.withValues(alpha: 0.75)],
@@ -402,17 +484,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                         end: Alignment.centerRight,
                       ),
                       dotData: FlDotData(
-                        show: true,
-                        checkToShowDot: (spot, barData) {
-                          if (firstX == null || lastX == null) return false;
-                          return spot.x == firstX || spot.x == lastX;
-                        },
-                        getDotPainter: (s, __, ___, ____) => FlDotCirclePainter(
-                          radius: 4.5,
-                          color: Colors.white,
-                          strokeColor: stroke,
-                          strokeWidth: 2.5,
-                        ),
+                        show: false, // Ẩn dot để tập trung vào đường cong
                       ),
                       belowBarData: BarAreaData(
                         show: true,
@@ -445,7 +517,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
         centerTitle: true,
       ),
       body: RefreshIndicator(
-        onRefresh: _refresh,
+        onRefresh: _loadInitialData, // Chỉ load lại khi kéo refresh
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           child: Padding(
@@ -475,12 +547,14 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                             ),
                           )
                           .toList(),
-                      onChanged: (v) async {
+                      onChanged: (v) {
                         if (v == null) return;
-                        _userOverrodeRange =
-                            true; // Đánh dấu người dùng đã chọn
-                        _range = v;
-                        await _refresh();
+                        setState(() {
+                          _userOverrodeRange =
+                              true; // Đánh dấu người dùng đã chọn
+                          _range = v;
+                          _updateChartData(); // Cập nhật biểu đồ mà không load lại
+                        });
                       },
                     ),
                   ],
@@ -504,7 +578,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
                           Text('Lỗi: $_error'),
                           const SizedBox(height: 8),
                           ElevatedButton(
-                            onPressed: _refresh,
+                            onPressed: _loadInitialData,
                             child: const Text('Thử lại'),
                           ),
                         ],
