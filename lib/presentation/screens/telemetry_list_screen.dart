@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -16,7 +18,16 @@ import 'package:my_app/presentation/screens/telemetry_detail_screen.dart';
 import 'package:my_app/notifications/notifier.dart' as notif;
 
 class TelemetryListScreen extends StatefulWidget {
-  const TelemetryListScreen({Key? key}) : super(key: key);
+  final List<TelemetryModel> devices;
+  final List<NotificationModel> unreadNotifs;
+  final List<NotificationModel> readNotifs;
+
+  const TelemetryListScreen({
+    Key? key,
+    required this.devices,
+    required this.unreadNotifs,
+    required this.readNotifs,
+  }) : super(key: key);
 
   @override
   State<TelemetryListScreen> createState() => _TelemetryListScreenState();
@@ -40,17 +51,15 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
   final Set<String> _knownNotifIds = {};
 
   // ====== Device list state ======
-  List<TelemetryModel> _devices = [];
-  bool _loading = true;
+  late List<TelemetryModel> _devices;
+  bool _loading = false;
   Object? _error;
 
   // ====== Notification state ======
-  bool _loadingNotifs = true;
+  late List<NotificationModel> _unreadNotifs;
+  late List<NotificationModel> _readNotifs;
+  bool _loadingNotifs = false;
   Object? _errorNotifs;
-
-  List<NotificationModel> _allNotifs = [];
-  List<NotificationModel> _unreadNotifs = [];
-  List<NotificationModel> _readNotifs = [];
 
   // Local “đã đọc” (ghi khi đóng dialog)
   final Set<String> _readIdsLocal = {};
@@ -62,19 +71,11 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
   @override
   void initState() {
     super.initState();
-
+    _devices = widget.devices;
+    _unreadNotifs = widget.unreadNotifs;
+    _readNotifs = widget.readNotifs;
     _restoreReadIds();
-    _loadData();
-    _refreshNotifications();
-
-    // _fb.start(
-    //   onChanged: () {
-    //     if (mounted) {
-    //       _loadData(silent: true);
-    //       _refreshNotifications();
-    //     }
-    //   },
-    // );
+    _knownNotifIds.addAll([..._unreadNotifs, ..._readNotifs].map((e) => e.id));
   }
 
   @override
@@ -128,12 +129,13 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     if (mounted) setState(() {});
   }
 
-  // Lấy danh sách thiết bị
-  Future<void> _loadData({bool silent = false}) async {
+  // Làm mới danh sách thiết bị và thông báo khi kéo refresh
+  Future<void> _refreshData() async {
+    setState(() => _loading = true);
     try {
-      if (!silent) setState(() => _loading = true);
-      final all = await _api.fetchTelemetry();
-
+      final all = await _api.fetchTelemetry().timeout(
+        const Duration(seconds: 10),
+      );
       final map = <String, TelemetryModel>{};
       for (final t in all) {
         final old = map[t.deviceId];
@@ -141,43 +143,30 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
           map[t.deviceId] = t;
         }
       }
-
-      if (mounted) {
-        setState(() {
-          _devices = map.values.toList();
-          _loading = false;
-          _error = null;
-        });
-      }
-    } catch (e) {
-      if (!silent && mounted) {
-        setState(() {
-          _error = e;
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  // Làm mới danh sách thông báo
-  Future<void> _refreshNotifications() async {
-    try {
       setState(() {
-        _loadingNotifs = true;
-        _errorNotifs = null;
+        _devices = map.values.toList();
+        _loading = false;
+        _error = null;
       });
+    } catch (e) {
+      print("Lỗi tải dữ liệu khi refresh: $e");
+      setState(() {
+        _error = e is TimeoutException ? 'Kết nối timeout' : e.toString();
+        _loading = false;
+      });
+    }
 
-      final items = await _notifApi.fetchNotifications();
-      _allNotifs = items;
-
+    setState(() => _loadingNotifs = true);
+    try {
+      final items = await _notifApi.fetchNotifications().timeout(
+        const Duration(seconds: 10),
+      );
       final beforeIds = Set<String>.from(_knownNotifIds);
-      _knownNotifIds
-        ..clear()
-        ..addAll(items.map((e) => e.id));
+      _knownNotifIds.clear();
+      _knownNotifIds.addAll(items.map((e) => e.id));
 
       final unread = <NotificationModel>[];
       final read = <NotificationModel>[];
-
       for (final n in items) {
         final isRead = n.read == true || _readIdsLocal.contains(n.id);
         (isRead ? read : unread).add(n);
@@ -191,7 +180,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
           .toList();
       _maybeShowLocalNotifications(newlyArrivedUnread);
 
-      int _cmp(NotificationModel a, NotificationModel b) {
+      unread.sort((a, b) {
         final at =
             a.createdAt ??
             a.savedAt ??
@@ -201,10 +190,18 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
             b.savedAt ??
             DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
         return bt.compareTo(at);
-      }
-
-      unread.sort(_cmp);
-      read.sort(_cmp);
+      });
+      read.sort((a, b) {
+        final at =
+            a.createdAt ??
+            a.savedAt ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+        final bt =
+            b.createdAt ??
+            b.savedAt ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+        return bt.compareTo(at);
+      });
 
       setState(() {
         _unreadNotifs = unread;
@@ -212,8 +209,9 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
         _loadingNotifs = false;
       });
     } catch (e) {
+      print("Lỗi tải thông báo khi refresh: $e");
       setState(() {
-        _errorNotifs = e;
+        _errorNotifs = e is TimeoutException ? 'Kết nối timeout' : e.toString();
         _loadingNotifs = false;
       });
     }
@@ -483,6 +481,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
   }
 
   Widget _buildBody() {
+    print("Số lượng thiết bị: ${_devices.length}");
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -496,7 +495,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
               Text('Lỗi: $_error'),
               const SizedBox(height: 8),
               ElevatedButton(
-                onPressed: _loadData,
+                onPressed: _refreshData,
                 child: const Text('Thử lại'),
               ),
             ],
@@ -509,15 +508,13 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
 
     return RefreshIndicator(
-      onRefresh: () async {
-        await _loadData();
-        await _refreshNotifications();
-      },
+      onRefresh: _refreshData,
       child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: _devices.length,
         itemBuilder: (context, i) {
           final item = _devices[i];
+          print("Thiết bị ${i + 1}: ${item.deviceId}");
           return Padding(
             padding: const EdgeInsets.all(8.0),
             child: GestureDetector(

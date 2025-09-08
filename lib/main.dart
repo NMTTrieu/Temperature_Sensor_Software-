@@ -4,7 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'firebase_options.dart';
-import 'presentation/screens/splash_screen.dart';
+import 'presentation/screens/loading_screen.dart';
 
 // <-- QUAN TRỌNG: import notifier với alias 'notif'
 import 'package:my_app/notifications/notifier.dart' as notif;
@@ -80,7 +80,7 @@ class MyApp extends StatelessWidget {
 
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: SplashScreen(),
+      home: LoadingScreen(),
     );
   }
 }

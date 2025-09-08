@@ -71,7 +71,7 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
         _loading = false;
       });
     } catch (e) {
-      print('Error loading data: $e'); // Log lỗi để debug
+      print('Error loading data: $e');
       setState(() {
         _loading = false;
         _error = e;
