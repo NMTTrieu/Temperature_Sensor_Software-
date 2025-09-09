@@ -33,19 +33,16 @@ class _LoadingScreenState extends State<LoadingScreen>
     path: 'telemrtry_updates',
   );
 
-  // Device list state
   List<TelemetryModel> _devices = [];
   bool _loading = true;
   Object? _error;
 
-  // Notification state
   bool _loadingNotifs = true;
   Object? _errorNotifs;
   List<NotificationModel> _allNotifs = [];
   List<NotificationModel> _unreadNotifs = [];
   List<NotificationModel> _readNotifs = [];
 
-  // Local “đã đọc” (ghi khi đóng dialog)
   final Set<String> _readIdsLocal = {};
   static const _prefsKeyReadIds = 'notif_read_ids_v1';
 
@@ -87,7 +84,7 @@ class _LoadingScreenState extends State<LoadingScreen>
     try {
       print("Bắt đầu tải dữ liệu thiết bị...");
       final all = await _api.fetchTelemetry().timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 180),
       );
       print("Dữ liệu thiết bị tải về: ${all.length} bản ghi");
       final map = <String, TelemetryModel>{};
@@ -124,7 +121,7 @@ class _LoadingScreenState extends State<LoadingScreen>
         _errorNotifs = null;
       });
       final items = await _notifApi.fetchNotifications().timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 180),
       );
       print("Thông báo tải về: ${items.length} bản ghi");
       _allNotifs = items;

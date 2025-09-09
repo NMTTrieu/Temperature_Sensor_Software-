@@ -34,7 +34,6 @@ class TelemetryListScreen extends StatefulWidget {
 }
 
 class _TelemetryListScreenState extends State<TelemetryListScreen> {
-  // ====== Services ======
   final _api = TelemetryService(
     apiUrl: 'https://be-mqtt-iot.onrender.com/api/telemetry',
   );
@@ -47,25 +46,23 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     path: 'telemrtry_updates',
   );
 
-  // Theo dõi những ID thông báo đã từng thấy để chỉ báo những cái mới
   final Set<String> _knownNotifIds = {};
 
-  // ====== Device list state ======
+  // Trạng thái danh sách thiết bị
   late List<TelemetryModel> _devices;
   bool _loading = false;
   Object? _error;
 
-  // ====== Notification state ======
+  // Trạng thái thông báo
   late List<NotificationModel> _unreadNotifs;
   late List<NotificationModel> _readNotifs;
   bool _loadingNotifs = false;
   Object? _errorNotifs;
 
-  // Local “đã đọc” (ghi khi đóng dialog)
+  // Lưu trữ cục bộ "đã đọc"
   final Set<String> _readIdsLocal = {};
   static const _prefsKeyReadIds = 'notif_read_ids_v1';
 
-  // UI constants
   static const double _notifItemHeight = 96.0;
 
   @override
@@ -84,7 +81,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     super.dispose();
   }
 
-  // ====== Local notifications when new items appear ======
+  //Thông báo cục bộ khi có mục mới xuất hiệ
   void _maybeShowLocalNotifications(List<NotificationModel> newest) {
     if (newest.isEmpty) return;
 
@@ -114,7 +111,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // ====== Persist read ids ======
+  //Lưu trữ ID đã đọc
   Future<void> _persistReadIds() async {
     final sp = await SharedPreferences.getInstance();
     await sp.setStringList(_prefsKeyReadIds, _readIdsLocal.toList());
@@ -134,7 +131,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     setState(() => _loading = true);
     try {
       final all = await _api.fetchTelemetry().timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 180),
       );
       final map = <String, TelemetryModel>{};
       for (final t in all) {
@@ -159,7 +156,7 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     setState(() => _loadingNotifs = true);
     try {
       final items = await _notifApi.fetchNotifications().timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 180),
       );
       final beforeIds = Set<String>.from(_knownNotifIds);
       _knownNotifIds.clear();
@@ -217,7 +214,6 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
     }
   }
 
-  // ---------- Dialog, filter, body, build (giữ nguyên UI cũ + icon chuông) ----------
   Widget _filterSegment({
     required bool showUnread,
     required VoidCallback onTapUnread,
@@ -539,7 +535,6 @@ class _TelemetryListScreenState extends State<TelemetryListScreen> {
       appBar: AppBar(
         title: const Text('Danh sách thiết bị'),
         actions: [
-          // Chuông + badge (giữ nguyên)
           AlertBadge(
             count: _unreadNotifs.length,
             onTap: _openNotificationsDialog,

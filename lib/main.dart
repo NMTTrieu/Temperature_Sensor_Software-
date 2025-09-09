@@ -6,10 +6,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'firebase_options.dart';
 import 'presentation/screens/loading_screen.dart';
 
-// <-- QUAN TRỌNG: import notifier với alias 'notif'
 import 'package:my_app/notifications/notifier.dart' as notif;
 
-// Handler cho FCM khi app ở background/terminated (phải là hàm top-level)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   print("Background Message: ${message.notification?.title}");
@@ -21,13 +19,12 @@ Future<void> main() async {
   // Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Khởi tạo local notifications + channel (idempotent: gọi nhiều lần cũng OK)
+  // Khởi tạo local thông báo
   await notif.Notifier.init();
 
   // Đăng ký handler background
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // Quyền thông báo (Android 13+/iOS)
   await FirebaseMessaging.instance.requestPermission(
     alert: true,
     badge: true,
@@ -35,7 +32,6 @@ Future<void> main() async {
     provisional: false,
   );
 
-  // (iOS) cho phép hiển thị thông báo khi app đang mở
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
     alert: true,
     badge: true,
@@ -50,7 +46,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Nhận FCM khi app đang foreground -> hiện local notification
     FirebaseMessaging.onMessage.listen((RemoteMessage msg) async {
       final n = msg.notification;
       if (n != null) {
@@ -73,10 +68,7 @@ class MyApp extends StatelessWidget {
       }
     });
 
-    // Nhấn vào thông báo mở app
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage msg) {
-      // TODO: Điều hướng đến màn chi tiết nếu bạn muốn
-    });
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage msg) {});
 
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
