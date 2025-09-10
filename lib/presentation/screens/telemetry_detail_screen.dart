@@ -60,10 +60,8 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
       ]);
 
       final device = results[0] as DeviceModel?;
-      final data = (results[1] as List<TelemetryModel>?)?.toList() ?? [];
-      if (data.isNotEmpty) {
-        data.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      }
+      final data = (results[1] as List<TelemetryModel>)
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
       setState(() {
         _device = device;
@@ -89,8 +87,6 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
 
     if (_allData.isEmpty) {
       times.add(now);
-      tSpots.add(FlSpot(0, 0));
-      hSpots.add(FlSpot(0, 0));
       setState(() {
         _xTimes = times;
         _tempSpots = tSpots;
@@ -114,7 +110,6 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
       startDate = startOfDay;
     }
 
-    // Lấy điểm gần nhất trước startDate
     TelemetryModel? nearestBeforeStart;
     double startTemperature = 0.0;
     double startHumidity = 0.0;
@@ -136,66 +131,53 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     }
 
     if (nearestBeforeStart != null) {
-      startTemperature = nearestBeforeStart.temperature ?? 0.0;
-      startHumidity = nearestBeforeStart.humidity ?? 0.0;
+      startTemperature = nearestBeforeStart.temperature;
+      startHumidity = nearestBeforeStart.humidity;
     }
 
     times.add(startDate);
     tSpots.add(FlSpot(0, startTemperature));
     hSpots.add(FlSpot(0, startHumidity));
 
-    // Lọc dữ liệu trong khoảng thời gian
     final filteredData = _allData.where((t) {
       final diff = now.difference(t.timestamp).inDays.abs();
       return diff <= daysAgo;
     }).toList()..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-    // Thêm các điểm dữ liệu và nội suy dựa trên milliseconds
-    if (filteredData.isNotEmpty) {
-      double lastTemp = startTemperature;
-      double lastHum = startHumidity;
-      int xIndex = 0;
+    for (int i = 0; i < filteredData.length; i++) {
+      final dataPoint = filteredData[i];
+      final prevTime = i == 0 ? startDate : filteredData[i - 1].timestamp;
+      final timeDiffMs =
+          dataPoint.timestamp.millisecondsSinceEpoch -
+          prevTime.millisecondsSinceEpoch;
+      if (timeDiffMs > 0) {
+        final steps = 7; // Số điểm nội suy giữa hai điểm
+        final tempDiff =
+            (dataPoint.temperature -
+                (i == 0 ? startTemperature : filteredData[i - 1].temperature)) /
+            steps;
+        final humDiff =
+            (dataPoint.humidity -
+                (i == 0 ? startHumidity : filteredData[i - 1].humidity)) /
+            steps;
 
-      for (int i = 0; i < filteredData.length; i++) {
-        final dataPoint = filteredData[i];
-        final timeMs = dataPoint.timestamp.millisecondsSinceEpoch;
-        times.add(dataPoint.timestamp);
-        xIndex = times.length - 1;
-
-        final temp = dataPoint.temperature ?? lastTemp;
-        final hum = dataPoint.humidity ?? lastHum;
-
-        if (temp != lastTemp || i == filteredData.length - 1) {
-          tSpots.add(FlSpot(xIndex.toDouble(), temp));
-          lastTemp = temp;
-        }
-        if (hum != lastHum || i == filteredData.length - 1) {
-          hSpots.add(FlSpot(xIndex.toDouble(), hum));
-          lastHum = hum;
-        }
-
-        // Nội suy giữa các điểm dựa trên milliseconds
-        if (i < filteredData.length - 1) {
-          final nextDataPoint = filteredData[i + 1];
-          final timeDiffMs =
-              nextDataPoint.timestamp.millisecondsSinceEpoch - timeMs;
-          if (timeDiffMs > 0 &&
-              (temp != (nextDataPoint.temperature ?? 0.0) ||
-                  hum != (nextDataPoint.humidity ?? 0.0))) {
-            final tempDiff = ((nextDataPoint.temperature ?? 0.0) - temp) / 5;
-            final humDiff = ((nextDataPoint.humidity ?? 0.0) - hum) / 5;
-            for (int j = 1; j < 5; j++) {
-              final interpTimeMs = timeMs + (timeDiffMs * j ~/ 5);
-              final interpTime = DateTime.fromMillisecondsSinceEpoch(
-                interpTimeMs,
-                isUtc: true,
-              ).toLocal();
-              times.add(interpTime);
-              xIndex = times.length - 1;
-              tSpots.add(FlSpot(xIndex.toDouble(), temp + tempDiff * j));
-              hSpots.add(FlSpot(xIndex.toDouble(), hum + humDiff * j));
-            }
-          }
+        for (int j = 0; j <= steps; j++) {
+          final interpTimeMs =
+              prevTime.millisecondsSinceEpoch + (timeDiffMs * j ~/ steps);
+          final interpTime = DateTime.fromMillisecondsSinceEpoch(
+            interpTimeMs,
+            isUtc: true,
+          ).toLocal();
+          times.add(interpTime);
+          final xIndex = times.length - 1;
+          final interpTemp =
+              (i == 0 ? startTemperature : filteredData[i - 1].temperature) +
+              tempDiff * j;
+          final interpHum =
+              (i == 0 ? startHumidity : filteredData[i - 1].humidity) +
+              humDiff * j;
+          tSpots.add(FlSpot(xIndex.toDouble(), interpTemp));
+          hSpots.add(FlSpot(xIndex.toDouble(), interpHum));
         }
       }
     }
@@ -203,16 +185,10 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     times.add(now);
     if (filteredData.isNotEmpty) {
       tSpots.add(
-        FlSpot(
-          (times.length - 1).toDouble(),
-          filteredData.last.temperature ?? 0.0,
-        ),
+        FlSpot((times.length - 1).toDouble(), filteredData.last.temperature),
       );
       hSpots.add(
-        FlSpot(
-          (times.length - 1).toDouble(),
-          filteredData.last.humidity ?? 0.0,
-        ),
+        FlSpot((times.length - 1).toDouble(), filteredData.last.humidity),
       );
     } else {
       tSpots.add(FlSpot((times.length - 1).toDouble(), startTemperature));
@@ -327,16 +303,14 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
     double? fixedMinY,
     double? fixedMaxY,
   }) {
-    if (spots.isEmpty) {
-      return const Center(child: Text('Không có dữ liệu'));
-    }
-
-    final minY =
-        fixedMinY ??
-        spots.map((e) => e.y).reduce((a, b) => a < b ? a : b) - 0.5;
-    final maxY =
-        fixedMaxY ??
-        spots.map((e) => e.y).reduce((a, b) => a > b ? a : b) + 0.5;
+    final minY = spots.isEmpty
+        ? (fixedMinY ?? 0.0)
+        : (fixedMinY ??
+              (spots.map((e) => e.y).reduce((a, b) => a < b ? a : b) - 0.5));
+    final maxY = spots.isEmpty
+        ? (fixedMaxY ?? 1.0)
+        : (fixedMaxY ??
+              (spots.map((e) => e.y).reduce((a, b) => a > b ? a : b) + 0.5));
 
     final yRange = (maxY - minY).abs();
     final yInterval = yRange <= 5 ? 1.0 : (yRange / 5).ceilToDouble();
@@ -360,161 +334,176 @@ class _TelemetryDetailScreenState extends State<TelemetryDetailScreen> {
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
       child: AspectRatio(
         aspectRatio: 16 / 9,
-        child: LineChart(
-          LineChartData(
-            minX: minX,
-            maxX: maxX,
-            minY: minY,
-            maxY: maxY,
-            lineTouchData: LineTouchData(
-              enabled: true,
-              touchTooltipData: LineTouchTooltipData(
-                getTooltipColor: (_) => Colors.white,
-                tooltipBorderRadius: BorderRadius.circular(10),
-                tooltipPadding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                getTooltipItems: (touchedSpots) {
-                  return touchedSpots.map((touchedSpot) {
-                    final index = touchedSpot.spotIndex;
-                    final yValue = touchedSpot.y.toStringAsFixed(1);
-                    String timeLabel = index >= 0 && index < _xTimes.length
-                        ? (_range == '1d'
-                              ? DateFormat(
-                                  'HH:mm',
-                                ).format(_xTimes[index].toLocal())
-                              : DateFormat(
-                                  'd/M',
-                                ).format(_xTimes[index].toLocal()))
-                        : 'N/A';
-                    return LineTooltipItem(
-                      '$yValue $yUnitSuffix\n$timeLabel',
-                      const TextStyle(
-                        color: Colors.grey,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
+        child: spots.isEmpty
+            ? const Center(child: Text('Không có dữ liệu'))
+            : LineChart(
+                LineChartData(
+                  minX: minX,
+                  maxX: maxX,
+                  minY: minY,
+                  maxY: maxY,
+                  lineTouchData: LineTouchData(
+                    enabled: true,
+                    handleBuiltInTouches: true,
+                    touchTooltipData: LineTouchTooltipData(
+                      getTooltipColor: (_) => Colors.white,
+                      tooltipBorderRadius: BorderRadius.circular(10),
+                      tooltipPadding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
                       ),
-                    );
-                  }).toList();
-                },
-              ),
-            ),
-            gridData: FlGridData(
-              show: true,
-              drawVerticalLine: true,
-              drawHorizontalLine: true,
-              getDrawingHorizontalLine: (value) => FlLine(
-                color: Colors.grey.withOpacity(0.12),
-                strokeWidth: 1,
-                dashArray: const [8, 4],
-              ),
-              getDrawingVerticalLine: (value) => FlLine(
-                color: Colors.grey.withOpacity(0.12),
-                strokeWidth: 1,
-                dashArray: const [8, 4],
-              ),
-              verticalInterval: step.toDouble(),
-              horizontalInterval: yInterval,
-            ),
-            titlesData: FlTitlesData(
-              topTitles: const AxisTitles(
-                sideTitles: SideTitles(showTitles: false),
-              ),
-              rightTitles: const AxisTitles(
-                sideTitles: SideTitles(showTitles: false),
-              ),
-              leftTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  reservedSize: 48,
-                  interval: yInterval,
-                  getTitlesWidget: (value, meta) {
-                    if (value == minY || value == maxY) {
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          value.toStringAsFixed(1),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
-                ),
-              ),
-              bottomTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  reservedSize: 36,
-                  interval: step.toDouble(),
-                  getTitlesWidget: (value, meta) {
-                    final idx = value.round();
-                    if (idx < 0 || idx >= _xTimes.length)
-                      return const SizedBox.shrink();
-                    final label = _formatXLabel(idx);
-                    if (idx > 0 && _formatXLabel(idx - 1) == label)
-                      return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        label,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-            borderData: FlBorderData(
-              show: true,
-              border: Border.all(color: Colors.grey.withOpacity(0.08)),
-            ),
-            lineBarsData: [
-              LineChartBarData(
-                spots: spots,
-                isCurved: true,
-                barWidth: 2,
-                color: stroke,
-                dotData: FlDotData(
-                  show: true,
-                  getDotPainter: (spot, percent, bar, index) {
-                    if (index == 0 || index == spots.length - 1) {
-                      return FlDotCirclePainter(
-                        radius: 4,
-                        color: Colors.white,
-                        strokeColor: stroke,
-                        strokeWidth: 2,
-                      );
-                    }
-                    return FlDotCirclePainter(radius: 2, color: stroke);
-                  },
-                ),
-                belowBarData: BarAreaData(
-                  show: true,
-                  gradient: LinearGradient(
-                    colors: [
-                      stroke.withOpacity(0.25),
-                      fill.last.withOpacity(0.08),
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
+                      getTooltipItems: (touchedSpots) {
+                        return touchedSpots.map((touchedSpot) {
+                          final index = touchedSpot.spotIndex;
+                          final yValue = touchedSpot.y.toStringAsFixed(1);
+                          String timeLabel;
+                          if (index >= 0 && index < _xTimes.length) {
+                            final dt = _xTimes[index].toLocal();
+                            timeLabel = _range == '1d'
+                                ? DateFormat('HH:mm').format(dt)
+                                : DateFormat('d/M').format(dt);
+                          } else {
+                            timeLabel = 'N/A';
+                          }
+                          return LineTooltipItem(
+                            '$yValue $yUnitSuffix\n$timeLabel',
+                            TextStyle(
+                              color: Colors.grey[800],
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                            ),
+                          );
+                        }).toList();
+                      },
+                    ),
+                    getTouchedSpotIndicator: (bar, spotIndexes) {
+                      return spotIndexes
+                          .map(
+                            (i) => TouchedSpotIndicatorData(
+                              FlLine(
+                                color: stroke.withOpacity(0.6),
+                                strokeWidth: 1,
+                                dashArray: const [4, 3],
+                              ),
+                              FlDotData(
+                                show: false, // Ẩn dot khi chạm
+                              ),
+                            ),
+                          )
+                          .toList();
+                    },
                   ),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: true,
+                    drawHorizontalLine: true,
+                    getDrawingHorizontalLine: (v) => FlLine(
+                      color: Colors.grey.withOpacity(0.12),
+                      strokeWidth: 1,
+                      dashArray: const [8, 4],
+                    ),
+                    getDrawingVerticalLine: (v) => FlLine(
+                      color: Colors.grey.withOpacity(0.12),
+                      strokeWidth: 1,
+                      dashArray: const [8, 4],
+                    ),
+                    verticalInterval: step.toDouble(),
+                    horizontalInterval: yInterval,
+                  ),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 48,
+                        interval: (maxY - minY),
+                        getTitlesWidget: (value, meta) {
+                          if (value == minY || value == maxY) {
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Text(
+                                value % 1 == 0
+                                    ? value.toStringAsFixed(0)
+                                    : value.toStringAsFixed(1),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[600],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 36,
+                        interval: step.toDouble(),
+                        getTitlesWidget: (value, meta) {
+                          final idx = value.round();
+                          if (idx < 0 || idx >= _xTimes.length)
+                            return const SizedBox.shrink();
+                          final label = _formatXLabel(idx);
+                          if (idx > 0 && _formatXLabel(idx - 1) == label) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  borderData: FlBorderData(
+                    show: true,
+                    border: Border.all(
+                      color: Colors.grey.withOpacity(0.08),
+                      width: 1,
+                    ),
+                  ),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: spots,
+                      isCurved: true, // Bật đường cong để làm mượt mà
+                      curveSmoothness: 0.3, // Điều chỉnh độ mượt
+                      barWidth: 2.0,
+                      color: stroke,
+                      dotData: FlDotData(
+                        show: false, // Ẩn tất cả các dot
+                      ),
+                      belowBarData: BarAreaData(
+                        show: true,
+                        gradient: LinearGradient(
+                          colors: [
+                            stroke.withOpacity(0.25),
+                            fill.last.withOpacity(0.08),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+                duration: const Duration(milliseconds: 450),
+                curve: Curves.easeInOut,
               ),
-            ],
-          ),
-          duration: const Duration(milliseconds: 450),
-          curve: Curves.easeInOut,
-        ),
       ),
     );
   }
